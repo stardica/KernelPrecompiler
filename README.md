@@ -1,4 +1,0 @@
-KernelPrecompiler
-=================
-
-OpenCL Kernel Precompiler
