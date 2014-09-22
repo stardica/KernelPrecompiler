@@ -1,30 +1,30 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <iostream>
-#include <fstream>
-#include <sstream>
 #include <CL/cl.h>
+
+
+#define KERNELPATHIN	"/home/stardica/Desktop/Kernels/MatrixMultiplication_Kernels.cl"
+#define KERNELPATHOUT	"/home/stardica/Desktop/Kernels/MatrixMultiplication_Kernels.cl.bin"
 
 
 //Function prototypes
 cl_context CreateContext(void);
 cl_command_queue CreateCommandQueue(cl_context context, cl_device_id *device);
 void Cleanup(cl_context context, cl_command_queue commandQueue, cl_program program);
-cl_program CreateProgramFromBinary(cl_context context, cl_device_id device, const char* fileName);
 cl_program CreateProgram(cl_context context, cl_device_id device, const char* fileName);
 bool SaveProgramBinary(cl_program program, cl_device_id device, const char* fileName);
 
 
-//Global variables
 
-int main(int argc, char** argv)
-{
+
+int main(int argc, char** argv){
+
     cl_context context = 0;
     cl_command_queue commandQueue = 0;
     cl_program program = 0;
     cl_device_id device = 0;
 
-    // Create an OpenCL context on first available platform
+    //Create an OpenCL context on first available platform
     context = CreateContext();
     if (context == NULL)
     {
@@ -32,41 +32,37 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    // Create a command-queue on the first device available
-    // on the created context
+    //Create a command-queue on the first device available on the created context
     commandQueue = CreateCommandQueue(context, &device);
     if (commandQueue == NULL)
     {
-        Cleanup(context, commandQueue, program);
-        return 1;
+    	printf("Failed to create commandQueue.\n");
+    	Cleanup(context, commandQueue, program);
+    	return 1;
     }
 
-    // Create OpenCL program - first attempt to load cached binary.
-    //  If that is not available, then create the program from source
-    //  and store the binary for future use.
-    printf("Attempting to create kernel binary from source...\n");
-
-    //program = CreateProgramFromBinary(context, device, "HelloWorld.cl.bin");
-    //if (program == NULL)
-    //{
-        //printf("Binary not loaded, create from source...\n");
-    program = CreateProgram(context, device, "/home/stardica/Desktop/KernelPrecompiler/Release/MatrixMultiplication_Kernels.cl");
+    // Create OpenCL program and store the binary for future use.
+    printf("Attempting to create kernel binary from source.\n");
+    program = CreateProgram(context, device, KERNELPATHIN);
     if (program == NULL)
     {
-         Cleanup(context, commandQueue, program);
-         return 1;
+    	printf("Failed to create Program");
+    	Cleanup(context, commandQueue, program);
+    	return 1;
     }
 
-    printf("Save program binary for future run...\n");
-    if (SaveProgramBinary(program, device, "/home/stardica/Desktop/KernelPrecompiler/Release/MatrixMultiplication_Kernels.cl.bin") == false)
+    printf("Kernel is saved.\n");
+    if (SaveProgramBinary(program, device, KERNELPATHOUT) == false)
     {
         printf("Failed to write program binary.\n");
         Cleanup(context, commandQueue, program);
         return 1;
      }
 
+    printf("---Done---");
     return 0;
 }
+
 
 cl_context CreateContext() {
     cl_int errNum;
@@ -154,8 +150,9 @@ cl_command_queue CreateCommandQueue(cl_context context, cl_device_id *device)
 
 void Cleanup(cl_context context, cl_command_queue commandQueue, cl_program program){
 
-    if (commandQueue != 0)
-        clReleaseCommandQueue(commandQueue);
+
+	if (commandQueue != 0)
+		clReleaseCommandQueue(commandQueue);
 
     if (program != 0)
         clReleaseProgram(program);
@@ -164,84 +161,44 @@ void Cleanup(cl_context context, cl_command_queue commandQueue, cl_program progr
         clReleaseContext(context);
 }
 
-cl_program CreateProgramFromBinary(cl_context context, cl_device_id device, const char* fileName){
-
-	FILE *fp = fopen(fileName, "rb");
-    if (fp == NULL)
-    {
-    	printf("CreateProgramFromBinary(): Can't open binary file.\n");
-        return NULL;
-    }
-
-    // Determine the size of the binary
-    size_t binarySize;
-    fseek(fp, 0, SEEK_END);
-    binarySize = ftell(fp);
-    rewind(fp);
-
-    unsigned char *programBinary = new unsigned char[binarySize];
-    fread(programBinary, 1, binarySize, fp);
-    fclose(fp);
-
-    cl_int errNum = 0;
-    cl_program program;
-    cl_int binaryStatus;
-
-    program = clCreateProgramWithBinary(context, 1, &device, &binarySize, (const unsigned char**)&programBinary, &binaryStatus,&errNum);
-
-    delete [] programBinary;
-    if (errNum != CL_SUCCESS)
-    {
-        printf("Error loading program binary.\n");
-        return NULL;
-    }
-
-    if (binaryStatus != CL_SUCCESS)
-    {
-        printf("Invalid binary for device.\n");
-        return NULL;
-    }
-
-    errNum = clBuildProgram(program, 0, NULL, NULL, NULL, NULL);
-    if (errNum != CL_SUCCESS)
-    {
-        // Determine the reason for the error
-        char buildLog[16384];
-        char *buildlog_ptr = NULL;
-        clGetProgramBuildInfo(program, device, CL_PROGRAM_BUILD_LOG, sizeof(buildLog), buildLog, NULL);
-
-        buildlog_ptr = (char *)&buildLog;
-        printf("Error in program: %s", buildlog_ptr);
-        clReleaseProgram(program);
-        return NULL;
-    }
-
-    return program;
-}
-
 cl_program CreateProgram(cl_context context, cl_device_id device, const char* fileName) {
 
 	cl_int errNum;
     cl_program program;
 
-    std::ifstream kernelFile(fileName, std::ios::in);
-    if (!kernelFile.is_open())
+    char *buffer;
+    long length = 0;
+    char temp;
+    FILE *fp;
+
+    fp = fopen(fileName, "r");
+    if (fp == NULL)
     {
-        printf("Failed to open file for reading: \n");
+        printf("Failed to open input file.\n");
         return NULL;
     }
 
-    std::ostringstream oss;
-    oss << kernelFile.rdbuf();
+    fseek(fp, 0L, SEEK_END);
+    //apparently using ftell to get file size of a text file is bad.
+    length = ftell(fp);
+    if (length < 0){
+    	printf("Error getting file size.\n");
+    	return NULL;
+    }
+    fseek(fp, 0L, SEEK_SET);
 
-    std::string srcStdStr = oss.str();
-    const char *srcStr = srcStdStr.c_str();
-    program = clCreateProgramWithSource(context, 1,
-                                        (const char**)&srcStr,
-                                        NULL, NULL);
+    buffer = (char *) malloc(length + 1);
+    fread(buffer, 1, length, fp);
+    //ftell is bad. Sometimes you get garbage at the end of the string.
+    //add 0 to the end to terminate the string correctly.
+    buffer[length] = 0;
+    printf("%s\n", buffer);
+    fclose(fp);
+
+    program = clCreateProgramWithSource(context, 1, (const char**)&buffer, NULL, NULL);
     if (program == NULL)
     {
-        std::cerr << "Failed to create CL program from source." << std::endl;
+        printf("Failed to create CL program from source.\n");
         return NULL;
     }
 
@@ -250,11 +207,10 @@ cl_program CreateProgram(cl_context context, cl_device_id device, const char* fi
     {
         // Determine the reason for the error
         char buildLog[16384];
-        clGetProgramBuildInfo(program, device, CL_PROGRAM_BUILD_LOG,
-                              sizeof(buildLog), buildLog, NULL);
+        clGetProgramBuildInfo(program, device, CL_PROGRAM_BUILD_LOG, sizeof(buildLog), buildLog, NULL);
 
-        std::cerr << "Error in kernel: " << std::endl;
-        std::cerr << buildLog;
+        printf("Error in kernel\n");
+        //printf("%s\n", buildLog);
         clReleaseProgram(program);
         return NULL;
     }
